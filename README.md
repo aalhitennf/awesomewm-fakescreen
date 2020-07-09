@@ -1,0 +1,1 @@
+Module for easier use of awesomewms ability to create "fake" screen.
