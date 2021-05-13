@@ -1,39 +1,31 @@
 -- Modules
 local awful = require('awful')
 ---- Ratio that screen is split
-local ratio = 0.7062-- 0.6465
--- Resize amount in pixels
-local resize_amount = 10
+local ratio = 0.733 -- 0.6465
+-- Default resize amount
+local resize_default_amount = 10
 -- Table that holds all active fake screen variables
 local screens = {}
 -- Modkeys
-local modkey = 'Mod4' -- Win button
+local modkey = 'Mod4' -- Win/Super
 local altkey = 'Mod1' -- Alt
 
-local function monitor_has_fake()
-  local scr = awful.screen.focused()
-  if scr.has_fake or scr.is_fake then
-    return true
-  end
+local function screen_has_fake(s)
+  s = s or awful.screen.focused()
+  return s.has_fake or s.is_fake
 end
 
 local function create_fake(s)
-  local scr = s
-  -- If screen was not passed, create on focused
-  if not scr then
-  -- Get focused screen
-    scr = awful.screen.focused()
-  end
+  -- If screen was not passed
+  s = s or awful.screen.focused()
   -- If already is or has fake
-  if monitor_has_fake(scr) then
-    return
-  end
+  if screen_has_fake(s) then return end
   -- Create variables
-  local geo = scr.geometry
+  local geo = s.geometry
   local real_w = math.floor(geo.width * ratio)
   local fake_w = geo.width - real_w
   -- Index for cleaner code
-  local index = tostring(scr.index)
+  local index = tostring(s.index)
   -- Set initial sizes into memory
   screens[index] = {}
   screens[index].geo = geo
@@ -41,129 +33,128 @@ local function create_fake(s)
   screens[index].fake_w = fake_w
   -- Create if doesn't exist
   -- Resize screen
-  scr:fake_resize(geo.x, geo.y, real_w, geo.height)
+  s:fake_resize(geo.x, geo.y, real_w, geo.height)
   -- Create fake for screen
-  scr.fake = _G.screen.fake_add(
+  s.fake = _G.screen.fake_add(
     geo.x + real_w,
     geo.y,
     fake_w,
     geo.height
   )
-  scr.fake.parent = scr
+  s.fake.parent = s
   -- Mark screens
-  scr.fake.is_fake = true
-  scr.has_fake = true
+  s.fake.is_fake = true
+  s.has_fake = true
   -- Change status
-  scr.fake.status = 'open'
+  s.fake.is_open = true
   -- Because memory leak
   collectgarbage('collect')
   -- Emit signal
-  scr:emit_signal('fake_created')
+  s:emit_signal('fake_created')
 end
 
-local function remove_fake()
-  -- Get focused screen
-  local scr = awful.screen.focused()
+local function remove_fake(s)
+  -- Return if no screen presented
+  s = s or awful.screen.focused()
   -- Ge real screen if fake was focused
-  if scr.is_fake then
-    scr = scr.parent
-  end
+  if s.is_fake then s = s.parent end
+  -- If screen doesn't have fake
+  if not s.has_fake then return end
   -- Index for cleaner code
-  local index = tostring(scr.index)
-  scr:fake_resize(
+  local index = tostring(s.index)
+  s:fake_resize(
     screens[index].geo.x,
     screens[index].geo.y,
     screens[index].geo.width,
     screens[index].geo.height
   )
-  -- Remove and handle variagles
-  scr.fake:fake_remove()
-  scr.has_fake = false
-  scr.fake = nil
+  -- Remove and handle variables
+  s.fake:fake_remove()
+  s.has_fake = false
+  s.fake = nil
   screens[index] = {}
-  -- Because memory leak
+  -- Because memory leaks
   collectgarbage('collect')
   -- Emit signal
-  scr:emit_signal('fake_created')
+  s:emit_signal('fake_created')
 end
 
 -- Toggle fake screen
-local function toggle_fake()
-  -- Get focused screen
-  local scr = awful.screen.focused()
+local function toggle_fake(s)
+  -- No screen given as parameter
+  s = s or awful.screen.focused()
   -- If screen doesn't have fake or isn't fake
-  if not scr.has_fake and not scr.is_fake then
-    return
-  end
+  if not s.has_fake and not s.is_fake then return end
   -- Ge real screen if fake was focused
-  if scr.is_fake then scr = scr.parent end
+  if s.is_fake then s = s.parent end
   -- Index for cleaner code
-  local index = tostring(scr.index)
+  local index = tostring(s.index)
   -- If fake was open
-  if scr.fake.status == 'open' then
+  if s.fake.is_open then
     -- Resize real screen to be initial size
-    scr:fake_resize(
+    s:fake_resize(
       screens[index].geo.x,
       screens[index].geo.y,
       screens[index].geo.width,
       screens[index].geo.height
     )
     -- Resize fake to 1px 'out of the view'
-    -- It will show up on screen on right side of
-    -- the screen we're handling
-    scr.fake:fake_resize(
+    -- 0px will move clients out of the screen.
+    -- On multi monitor setups it will show up
+    -- on screen on right side of the screen we're handling
+    s.fake:fake_resize(
       screens[index].geo.width,
       screens[index].geo.y,
       1,
       screens[index].geo.height
     )
     -- Mark fake as hidden
-    scr.fake.status = 'hidden'
-  -- Fake was selected
-  elseif scr.fake.status == 'hidden' then
+    s.fake.is_open = false
+  else -- Fake was selected
     -- Resize screens
-    scr:fake_resize(
+    s:fake_resize(
       screens[index].geo.x,
       screens[index].geo.y,
       screens[index].real_w,
       screens[index].geo.height
     )
-    scr.fake:fake_resize(
+    s.fake:fake_resize(
       screens[index].geo.x + screens[index].real_w,
       screens[index].geo.y,
       screens[index].fake_w,
       screens[index].geo.height
     )
     -- Mark fake as open
-    scr.fake.status = 'open'
+    s.fake.is_open = true
   end
-  -- Because memory leak
+  -- Because memory leaks
   collectgarbage('collect')
+  -- Emit signal
+  s:emit_signal('fake_toggle')
 end
 
 -- Resize fake with given amount in pixels
-local function resize_fake(amount)
-  -- Get focused screen
-  local scr = awful.screen.focused()
+local function resize_fake(amount, s)
+  -- No screen given
+  s = s or awful.screen.focused()
+  amount = amount or resize_default_amount
   -- Ge real screen if fake was focused
-  if scr.is_fake then
-    scr = scr.parent
-  end
+  if s.is_fake then s = s.parent end
   -- Index for cleaner code
-  local index = tostring(scr.index)
+  local index = tostring(s.index)
   -- Resize only if fake is open
-  if scr.fake.status == 'open' then
+  if s.fake.is_open then
     -- Modify width variables
     screens[index].real_w = screens[index].real_w + amount
     screens[index].fake_w = screens[index].fake_w - amount
     -- Resize screens
-    scr:fake_resize(
+    s:fake_resize(
       screens[index].geo.x,
       screens[index].geo.y,
       screens[index].real_w,
       screens[index].geo.height
     )
-    scr.fake:fake_resize(
+    s.fake:fake_resize(
       screens[index].geo.x + screens[index].real_w,
       screens[index].geo.y,
       screens[index].fake_w,
@@ -172,32 +163,30 @@ local function resize_fake(amount)
   end
   -- Because memory leak
   collectgarbage('collect')
+  -- Emit signal
+  s:emit_signal('fake_resize')
 end
 
--- Reset screens to default value
-local function reset_fake()
-  -- Get focused screen
-  local scr = awful.screen.focused()
-  -- Ge real screen if fake was focused
-  if scr.is_fake then
-    scr = scr.parent
-  end
+-- Reset screen widths to default value
+local function reset_fake(s)
+  -- No sreen given
+  s = s or awful.screen.focused()
+  -- Get real screen if fake was focused
+  if s.is_fake then s = s.parent end
   -- In case screen doesn't have fake
-  if not scr.has_fake then
-    return
-  end
+  if not s.has_fake then return end
   -- Index for cleaner code
-  local index = tostring(scr.index)
-  if scr.fake.status == 'open' then
+  local index = tostring(s.index)
+  if s.fake.is_open then
     screens[index].real_w = math.floor(screens[index].geo.width * ratio)
     screens[index].fake_w = screens[index].geo.width - screens[index].real_w
-    scr:fake_resize(
+    s:fake_resize(
       screens[index].geo.x,
       screens[index].geo.y,
       screens[index].real_w,
       screens[index].geo.height
     )
-    scr.fake:fake_resize(
+    s.fake:fake_resize(
       screens[index].real_w,
       screens[index].geo.y,
       screens[index].geo.width - screens[index].real_w,
@@ -206,60 +195,57 @@ local function reset_fake()
   end
   -- Because memory leak
   collectgarbage('collect')
+  -- Emit signal
+  s:emit_signal('fake_reset')
 end
 
--- Keybinds
+-- Keybinds for git version
 awful.keyboard.append_global_keybindings({
 
   -- Toggle/hide fake screen
   awful.key({ modkey }, '§',
     function()
-      toggle_fake()
+      _G.screen.emit_signal('toggle_fake')
     end,
-  { description = 'hide/show fake screen', group = 'fake screen' }),
+  { description = 'show/hide fake screen', group = 'fake screen' }),
 
   -- Create or remove
   awful.key({ modkey, altkey }, '§',
     function()
-      if not monitor_has_fake() then
-        create_fake()
-        return
+      if screen_has_fake() then
+        _G.screen.emit_signal('remove_fake')
+      else
+        _G.screen.emit_signal('create_fake')
       end
-      remove_fake()
     end,
-  { description = 'create/remove fake screen on focused', group = 'fake screen' }),
+  { description = 'create/remove fake screen', group = 'fake screen' }),
 
   -- Increase fake screen size
   awful.key({ modkey, altkey }, 'Left',
     function()
-      resize_fake(-resize_amount)
+      _G.screen.emit_signal('resize_fake', -10)
     end,
   { description = 'resize fake screen', group = 'fake screen' }),
 
   -- Decrease fake screen size
   awful.key({ modkey, altkey }, 'Right',
     function()
-      resize_fake(resize_amount)
+      _G.screen.emit_signal('resize_fake', 10)
     end,
     { description = 'resize fake screen', group = 'fake screen' }),
 
   -- Reset screen sizes to initial size
   awful.key({ modkey, altkey }, 'r',
     function()
-      reset_fake()
+      _G.screen.emit_signal('reset_fake')
     end,
     { description = 'reset fake screen size', group = 'fake screen' }),
 
 })
 
--- Automatically create fake screen on primary screen
--- if _G.prefs.screenfake then
---   create_fake(_G.screen.primary)
--- end
-
-for sc in pairs(_G.prefs.screens) do
-  if _G.prefs.screens[sc].fake.enabled then
-    create_fake(_G.screen[tonumber(sc)])
-  end
-end
-
+-- Signals, maybe useful for keybinds. s = screen, a = amount
+_G.screen.connect_signal('remove_fake', function(s) remove_fake(s) end)
+_G.screen.connect_signal('toggle_fake', function(s) toggle_fake(s) end)
+_G.screen.connect_signal('create_fake', function(s) create_fake(s) end)
+_G.screen.connect_signal('resize_fake', function(a, s) resize_fake(a, s) end)
+_G.screen.connect_signal('reset_fake', function(s) reset_fake(s) end)
